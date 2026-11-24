@@ -49,9 +49,13 @@ class File:
     path: str
     text: str | None = None
     raw: bytes | None = None
+    skip_reason: str | None = None
 
     def __post_init__(self) -> None:
-        if (self.text is None) == (self.raw is None):
+        if self.skip_reason is not None:
+            if self.text is not None or self.raw is not None:
+                raise ValueError(f"fixture file {self.path} cannot carry content when skipped")
+        elif (self.text is None) == (self.raw is None):
             raise ValueError(f"fixture file {self.path} must give exactly one of text and raw")
 
     def content(self) -> bytes:
@@ -101,6 +105,7 @@ def builders() -> Mapping[str, Builder]:
         ci_surface_hook_window,
         config_role,
         native_binary_artifact,
+        lifecycle_dlx,
         npm_lockfile_registry,
         stellar_seed,
         wasm_manifest,
@@ -112,6 +117,7 @@ def builders() -> Mapping[str, Builder]:
         **ci_surface.BUILDERS,
         **ci_surface_hook_window.BUILDERS,
         **config_role.BUILDERS,
+        **lifecycle_dlx.BUILDERS,
         **native_binary_artifact.BUILDERS,
         **npm_lockfile_registry.BUILDERS,
         **stellar_seed.BUILDERS,
@@ -163,9 +169,10 @@ def entry_for(file: File, role_globs: Mapping[str, tuple[str, ...]]) -> FileEntr
     data = file.content()
     return FileEntry(
         path=file.path,
-        sha256=digest(data),
+        sha256=None if file.skip_reason is not None else digest(data),
         roles=resolve_roles(file.path, data[:HEAD_BYTES], role_globs),
         text=file.text,
+        skip_reason=file.skip_reason,
     )
 
 

@@ -71,6 +71,7 @@ class TestShippedRuleSet:
             "cargo-patch-override",
             "cargo-path-escape",
             "native-binary-artifact",
+            "submodule-url-drift",
         }
 
     def test_a_pattern_rule_without_a_detector_carries_a_pattern(self) -> None:
