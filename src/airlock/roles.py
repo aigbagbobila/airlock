@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 WASM_MAGIC = b"\x00asm"
@@ -86,6 +87,12 @@ SENSITIVE_ROLES = frozenset(
         INSTALL_HOOK_ROLE,
     }
 )
+
+#: Step budget for one glob match. A `**` pattern is memoised on the pattern and path indices,
+#: so a legitimate match costs at most one step per index pair. The budget exists for the pair
+#: the memo cannot help with, a path the scanned repository chose to make pathologically deep,
+#: and it fails closed: see `_match_steps`.
+DEFAULT_MATCH_STEPS = 10_000
 
 #: Every role name the resolver can produce before `roles.toml` globs are added.
 BUILTIN_ROLES = frozenset({WASM_ROLE, NATIVE_ROLE, ARCHIVE_ROLE, SOURCE_ROLE, DOC_ROLE, OTHER_ROLE})
@@ -179,25 +186,96 @@ def _segment_pattern(segment: str) -> re.Pattern[str]:
     return re.compile("\\A" + "".join(parts) + "\\Z")
 
 
-def match_glob(pattern: str, path: str) -> bool:
+@dataclass(frozen=True, slots=True)
+class CompiledGlob:
+    """One roles.toml pattern with its segment patterns compiled once.
+
+    `segments` holds `None` for a `**` segment and a compiled pattern for everything else.
+    The text is kept for the failure message, since a compiled pattern cannot name itself.
+    """
+
+    text: str
+    segments: tuple[re.Pattern[str] | None, ...]
+
+    @classmethod
+    def build(cls, pattern: str) -> CompiledGlob:
+        return cls(
+            text=pattern,
+            segments=tuple(
+                None if segment == "**" else _segment_pattern(segment)
+                for segment in pattern.split("/")
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RoleMatcher:
+    """The role table compiled once per scan: sorted role names and their compiled globs."""
+
+    roles: tuple[str, ...]
+    globs: tuple[tuple[CompiledGlob, ...], ...]
+
+    def roles_for(self, path: str, *, max_steps: int = DEFAULT_MATCH_STEPS) -> list[str]:
+        """Applicable roles in sorted name order, before the extension fallback."""
+        return [
+            role
+            for role, globs in zip(self.roles, self.globs, strict=True)
+            if any(_match_compiled(glob, path, max_steps) for glob in globs)
+        ]
+
+
+def compile_role_globs(role_globs: Mapping[str, tuple[str, ...]]) -> RoleMatcher:
+    """Build the matcher once so a large tree does not rebuild the same patterns per file.
+
+    The table comes from `rules/roles.toml`, which cannot change during a scan, so this is
+    built in `collect` and passed down. It is not cached across scans: module-level mutable
+    state beyond the scan is forbidden (`AGENTS.md` 4).
+    """
+    roles = tuple(sorted(role_globs))
+    return RoleMatcher(
+        roles=roles,
+        globs=tuple(
+            tuple(CompiledGlob.build(pattern) for pattern in role_globs[role]) for role in roles
+        ),
+    )
+
+
+def match_glob(pattern: str, path: str, *, max_steps: int = DEFAULT_MATCH_STEPS) -> bool:
     """Match a repo-relative path against one roles.toml pattern."""
-    return _match_segments(pattern.split("/"), path.split("/"))
+    return _match_compiled(CompiledGlob.build(pattern), path, max_steps)
 
 
-def _match_segments(pattern: list[str], path: list[str]) -> bool:
-    if not pattern:
-        return not path
-    head = pattern[0]
-    rest = pattern[1:]
-    if head == "**":
-        if not rest:
-            return True
-        return any(_match_segments(rest, path[start:]) for start in range(len(path) + 1))
-    if not path:
-        return False
-    if not _segment_pattern(head).match(path[0]):
-        return False
-    return _match_segments(rest, path[1:])
+def _match_compiled(glob: CompiledGlob, path: str, max_steps: int) -> bool:
+    segments = glob.segments
+    parts = tuple(path.split("/")) if path else ("",)
+    # Memoise on the pattern and path indices: `**` can reach the same pair from several start
+    # offsets, and without this the call count grows as depth to the number of `**` segments.
+    memo: dict[tuple[int, int], bool] = {}
+    steps = 0
+
+    def walk(i: int, j: int) -> bool:
+        nonlocal steps
+        if i == len(segments):
+            return j == len(parts)
+        key = (i, j)
+        if key in memo:
+            return memo[key]
+        steps += 1
+        if steps > max_steps:
+            raise ValueError(
+                f"glob match on {glob.text!r} exceeded {max_steps} steps against a path "
+                f"of {len(parts)} segments; the roles file is trusted, so the path is what "
+                f"made this expensive"
+            )
+        segment = segments[i]
+        if segment is None:
+            result = walk(i + 1, j) or (j < len(parts) and walk(i, j + 1))
+        else:
+            result = j < len(parts) and bool(segment.match(parts[j])) and walk(i + 1, j + 1)
+        memo[key] = result
+        return result
+
+    return walk(0, 0)
 
 
 def known_roles(role_globs: Iterable[str]) -> frozenset[str]:
@@ -222,21 +300,21 @@ def fallback_role(path: str) -> str:
 def resolve_roles(
     path: str,
     head: bytes,
-    role_globs: Mapping[str, tuple[str, ...]],
+    role_globs: Mapping[str, tuple[str, ...]] | RoleMatcher,
 ) -> tuple[str, ...]:
     """Every role that applies, in a stable order.
 
     A binary magic role means the file is not decoded text, so the extension fallback is
     deliberately not added for it: a Mach-O binary called `payload.rs` is `native-binary`,
     not a source file to run text rules over.
+
+    A plain mapping is compiled here, so callers outside the collector keep working; the
+    collector passes the matcher it built once per scan.
     """
     magic = roles_from_magic(head)
     if magic:
         return magic
-    roles = [role for role, globs in sorted(role_globs.items()) if _any_glob(globs, path)]
+    matcher = role_globs if isinstance(role_globs, RoleMatcher) else compile_role_globs(role_globs)
+    roles = matcher.roles_for(path)
     roles.append(fallback_role(path))
     return tuple(dict.fromkeys(roles))
-
-
-def _any_glob(globs: tuple[str, ...], path: str) -> bool:
-    return any(match_glob(pattern, path) for pattern in globs)

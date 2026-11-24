@@ -91,6 +91,16 @@ class PendingFinding:
     evidence: str | None
     suppressible: bool
     file_sha256: str | None = None
+    #: The untruncated copy kept for identity only. `evidence` is capped for display, and
+    #: hashing the capped copy made two lines sharing their first MAX_EVIDENCE_CHARS collide.
+    evidence_full: str | None = None
+
+    def __post_init__(self) -> None:
+        """Cap the display copy while keeping the full text for the fingerprint key."""
+        if self.evidence_full is None and self.evidence is not None:
+            object.__setattr__(self, "evidence_full", self.evidence)
+        if self.evidence is not None:
+            object.__setattr__(self, "evidence", truncate_evidence(self.evidence))
 
     def evidence_key(self) -> str:
         """File-level findings (line 0) hash on the file, not on a line of text.
@@ -102,7 +112,8 @@ class PendingFinding:
         the message is blank it keys on the rule, path and line rather than failing the scan.
         """
         if self.evidence is not None:
-            return normalize_evidence(self.evidence)
+            full = self.evidence_full if self.evidence_full is not None else self.evidence
+            return normalize_evidence(full)
         if self.file_sha256 is None:
             if not self.message.strip():
                 # A detector bug can produce a finding with nothing to key on. Raising here hides
@@ -128,6 +139,7 @@ class PendingFinding:
             evidence=truncate_evidence(evidence),
             suppressible=self.suppressible,
             file_sha256=self.file_sha256,
+            evidence_full=evidence,
         )
 
     def to_finding(self, occurrence: int) -> Finding:

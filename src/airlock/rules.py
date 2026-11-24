@@ -16,7 +16,7 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from .fingerprint import PendingFinding, truncate_evidence
+from .fingerprint import PendingFinding
 from .model import (
     MAX_MESSAGE_CHARS,
     STATE_RULE_IDS,
@@ -248,7 +248,7 @@ def finding_for(
         line=line_number,
         roles=entry.roles,
         message=((message or rule.title)[:MAX_MESSAGE_CHARS]),
-        evidence=truncate_evidence(entry.text if evidence is None else evidence),
+        evidence=entry.text if evidence is None else evidence,
         suppressible=rule.suppressible and rule.id not in STATE_RULE_IDS,
         file_sha256=entry.sha256,
     )

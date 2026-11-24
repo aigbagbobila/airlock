@@ -22,9 +22,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .fingerprint import PendingFinding, truncate_evidence
+from .fingerprint import PendingFinding
 from .model import FileEntry, Policy, Severity
-from .roles import SENSITIVE_ROLES, resolve_roles, roles_from_magic
+from .roles import (
+    SENSITIVE_ROLES,
+    RoleMatcher,
+    compile_role_globs,
+    resolve_roles,
+    roles_from_magic,
+)
 
 #: Roles whose content is still worth a lenient decode when strict UTF-8 fails, so one bad
 #: byte cannot hide a payload behind `non-utf8-text`.
@@ -183,7 +189,7 @@ def _state(
         line=0,
         roles=roles,
         message=message,
-        evidence=truncate_evidence(evidence),
+        evidence=evidence,
         suppressible=False,
     )
 
@@ -211,7 +217,7 @@ def _decode(data: bytes) -> tuple[str, bool]:
 
 
 def _collect_one(
-    repo_root: Path, entry: IndexEntry, policy: Policy, role_globs: Mapping[str, tuple[str, ...]]
+    repo_root: Path, entry: IndexEntry, policy: Policy, role_globs: RoleMatcher
 ) -> tuple[FileEntry, tuple[PendingFinding, ...]]:
     findings: list[PendingFinding] = []
     target = repo_root / entry.path
@@ -449,8 +455,11 @@ def collect(
     """
     entries: list[FileEntry] = []
     findings: list[PendingFinding] = []
+    # The role table cannot change during a scan, so compile it once instead of rebuilding
+    # the same sort and segment patterns for every entry (`AGENTS.md` 4: no cross-scan cache).
+    matcher = compile_role_globs(role_globs)
     for index_entry in list_tracked_files(repo_root):
-        entry, entry_findings = _collect_one(repo_root, index_entry, policy, role_globs)
+        entry, entry_findings = _collect_one(repo_root, index_entry, policy, matcher)
         entries.append(entry)
         findings.extend(entry_findings)
     return Collection(entries=tuple(entries), pending=tuple(findings))
