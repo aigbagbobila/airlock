@@ -7,9 +7,9 @@ metadata, and a gitlink without a matching URL is not an auditable dependency.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import json
 import tomllib
+from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 from ..fingerprint import PendingFinding

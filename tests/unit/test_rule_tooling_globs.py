@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.fixtures import fired
+from tests.fixtures.tooling_globs_extra import tooling_globs_extra
+
 from airlock.roles import resolve_roles
 from airlock.rules import load_role_globs
-from tests.fixtures.tooling_globs_extra import tooling_globs_extra
-from tests.fixtures import fired
-
 
 ROOT = Path(__file__).resolve().parents[2]
 

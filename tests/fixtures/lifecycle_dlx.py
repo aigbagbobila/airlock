@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from . import Case, File, Fixture
 
-
 PATH = "package.json"
 
 

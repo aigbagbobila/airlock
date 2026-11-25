@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tests.fixtures.lifecycle_dlx import lifecycle_dlx
 from tests.fixtures import fired
+from tests.fixtures.lifecycle_dlx import lifecycle_dlx
 
 
 def test_remote_one_shot_runners_fire_the_fetch_rule() -> None:

@@ -9,7 +9,6 @@ from airlock.detectors import submodules
 from airlock.model import EMPTY_MANIFEST, FileEntry, Policy, ScanContext
 from airlock.rules import load_role_globs, load_rules
 
-
 ROOT = Path(__file__).resolve().parents[2]
 RULE_GLOBS = load_role_globs(ROOT / "rules" / "roles.toml")
 RULES = load_rules(
