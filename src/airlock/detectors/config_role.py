@@ -136,20 +136,52 @@ def _shannon_entropy(text: str) -> float:
     return -sum((count / total) * math.log2(count / total) for count in Counter(text).values())
 
 
+def _tail_window(lines: dict[int, str], tail_max_len: int) -> tuple[int, int, str]:
+    """The trailing non-empty lines as one window: (first line, last line, text).
+
+    A payload split over the final two lines is measured as neither half when only the last line is
+    read: the blob before the terminator is never seen. Lines are gathered backwards until the
+    window reaches `tail_max_len`, and joined oldest to newest so entropy is measured over what the
+    file actually ends with.
+
+    Only a line that is one whitespace-free token is joined to the one after it. Ordinary code
+    lines carry spaces, and joining them would make the tail of a short config read as an opaque
+    blob purely because prose and code sit at the same entropy as a base64 run at this window size.
+    The final line is always the window's seed, so the rules this check already had are unchanged.
+    """
+    picked: list[tuple[int, str]] = []
+    size = 0
+    for number, line in reversed(list(lines.items())):
+        if not line.strip():
+            continue
+        if picked and len(line.split()) > 1:
+            break
+        size += len(line) + (1 if picked else 0)
+        picked.append((number, line))
+        if size >= tail_max_len:
+            break
+    if not picked:
+        return 0, 0, ""
+    picked.reverse()
+    return picked[0][0], picked[-1][0], "\n".join(line for _, line in picked)
+
+
 def _tail_finding(
     rule: Rule, entry: FileEntry, tail_max_len: int, tail_entropy: float
 ) -> PendingFinding | None:
-    """The appended payload shape: one long or high-entropy line after a valid config."""
-    last_number = 0
-    last_line = ""
-    for number, line in _text_lines(entry.text or "").items():
-        if line.strip():
-            last_number, last_line = number, line
-    if not last_line:
+    """The appended payload shape: trailing bytes that are too long or too opaque.
+
+    The length reason stays on the final line, because a minified bundle is one line by
+    construction. Entropy is measured across the window, so a high-entropy blob and a short
+    terminator after it are one payload rather than two innocent lines.
+    """
+    lines = _text_lines(entry.text or "")
+    first_number, last_number, trailing = _tail_window(lines, tail_max_len)
+    if not trailing:
         return None
-    window = last_line[-tail_max_len:]
+    window = trailing[-tail_max_len:]
     entropy = _shannon_entropy(window)
-    if len(last_line) > tail_max_len:
+    if len(lines[last_number]) > tail_max_len:
         reason = f"is longer than the {tail_max_len} character tail limit"
     elif entropy > tail_entropy:
         reason = (
@@ -161,8 +193,11 @@ def _tail_finding(
         rule,
         entry,
         last_number,
-        evidence=last_line,
-        message=f"{rule.title}: the last non-empty line (line {last_number}) {reason}",
+        evidence=lines[last_number],
+        message=(
+            f"{rule.title}: the trailing bytes from line {first_number} to line {last_number} "
+            f"{reason}"
+        ),
     )
 
 

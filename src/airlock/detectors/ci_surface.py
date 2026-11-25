@@ -49,6 +49,19 @@ _DISPLAY_VERB = re.compile(
 #: The one echo that is hygiene: masking a value so a later log line cannot leak it.
 _MASK_MARKER = "::add-mask::"
 
+#: The separators that make one YAML line several commands. `::add-mask::` redacts the value its
+#: own command names, so a second command on the same line is judged on its own.
+_SEGMENT_BREAK = re.compile(r"""[;&|]+""")
+
+#: A `git fetch` of the contributor's tree. `_HEAD_REF` expects an explicit `refs/pull/...` or the
+#: `pull_request` context, but a run block fetches the short `pull/N/head` form and then checks out
+#: `FETCH_HEAD`, which gives the head ref and the checkout half on lines `actions/checkout` never
+#: appears on. The intervening run is bounded so the pattern stays linear on a cap-length line.
+_FETCH_PR_REF = re.compile(
+    r"""\bgit\s+fetch\b[^\n]{0,200}?\bpull/(?:\d+|\$\{\{[^}]{1,64}\}\})/(?:head|merge)\b""",
+    re.VERBOSE,
+)
+
 #: A ref that resolves to the contributor's tree rather than the base. `refs/pull/N/head` and
 #: `refs/pull/N/merge` are the explicit forms; `github.event.pull_request.head` covers the ref, the
 #: sha and the fork clone url, which all point at the untrusted tree.
@@ -120,15 +133,26 @@ def _first_pattern_hit(
     return None
 
 
+def _unmasked(line: str) -> str:
+    """The line with the commands that mask a value taken out of it.
+
+    `::add-mask::` is hygiene for the one value it names, so the exemption is per command rather
+    than per line: `echo "::add-mask::${{ secrets.A }}"; echo ${{ secrets.B }}` still prints a
+    credential, and a line-scoped skip let it through.
+    """
+    return " ".join(
+        segment for segment in _SEGMENT_BREAK.split(line) if _MASK_MARKER not in segment
+    )
+
+
 def _secret_dumps(
     rule: Rule, entry: FileEntry, lines: dict[int, str], line_cap: int
 ) -> list[PendingFinding]:
     """Every line that names a credential and something that would print or store it."""
     findings: list[PendingFinding] = []
     for number, line in _searchable(lines, line_cap):
-        if _MASK_MARKER in line:
-            continue
-        if not _SECRETS_INTERP.search(line) or not _DISPLAY_VERB.search(line):
+        judged = _unmasked(line) if _MASK_MARKER in line else line
+        if not _SECRETS_INTERP.search(judged) or not _DISPLAY_VERB.search(judged):
             continue
         findings.append(
             finding_for(
@@ -145,6 +169,22 @@ def _secret_dumps(
     return findings
 
 
+def _fetched_head(lines: dict[int, str], line_cap: int) -> tuple[int, str] | None:
+    """A fetch of a pull request ref that a later checkout acts on.
+
+    The checkout requirement is what separates a fetch that only downloads objects from the
+    pairing this rule reports: without a `git checkout` after it, the contributor's tree never
+    becomes the working copy.
+    """
+    searchable = list(_searchable(lines, line_cap))
+    for index, (number, line) in enumerate(searchable):
+        if not _FETCH_PR_REF.search(line):
+            continue
+        if any("git checkout" in later for _, later in searchable[index:]):
+            return number, line
+    return None
+
+
 def _head_checkout(
     rule: Rule,
     entry: FileEntry,
@@ -152,13 +192,28 @@ def _head_checkout(
     trigger_rule: Rule | None,
     line_cap: int,
 ) -> PendingFinding | None:
-    """Privileged trigger plus a head ref plus a checkout step, in one file."""
+    """Privileged trigger plus a head ref plus a checkout, in one file."""
     trigger = _first_pattern_hit(trigger_rule, lines, line_cap)
+    if trigger is None:
+        return None
     step = _first_hit(lines, line_cap, _CHECKOUT_STEP)
     head = _first_hit(lines, line_cap, _HEAD_REF)
-    if trigger is None or step is None or head is None:
+    if step is not None and head is not None:
+        number, line = head
+        return finding_for(
+            rule,
+            entry,
+            number,
+            evidence=line,
+            message=(
+                f"{rule.title}: the trigger on line {trigger[0]} runs in the base context, and "
+                f"the checkout on line {step[0]} is told to use the head ref on line {number}"
+            ),
+        )
+    fetched = _fetched_head(lines, line_cap)
+    if fetched is None:
         return None
-    number, line = head
+    number, line = fetched
     return finding_for(
         rule,
         entry,
@@ -166,7 +221,7 @@ def _head_checkout(
         evidence=line,
         message=(
             f"{rule.title}: the trigger on line {trigger[0]} runs in the base context, and the "
-            f"checkout on line {step[0]} is told to use the head ref on line {number}"
+            f"fetch on line {number} pulls a pull request ref that a later checkout uses"
         ),
     )
 

@@ -12,6 +12,7 @@ from airlock.roles import (
     SOURCE_ROLE,
     WASM_ROLE,
     fallback_role,
+    known_roles,
     match_glob,
     resolve_roles,
     roles_from_magic,
@@ -68,6 +69,10 @@ class TestMagic:
     def test_a_truncated_header_does_not_match_tar(self) -> None:
         assert roles_from_magic(b"ustar") == ()
 
+    def test_an_mz_prefix_too_short_for_a_dos_header_has_no_magic_role(self) -> None:
+        # `_is_pe` refuses to read `e_lfanew` out of a buffer shorter than the DOS header.
+        assert roles_from_magic(b"MZ") == ()
+
 
 class TestGlob:
     def test_a_lone_star_cannot_cross_a_directory(self) -> None:
@@ -103,6 +108,24 @@ class TestGlob:
     def test_brackets_in_a_path_are_literal(self) -> None:
         assert match_glob("**/[id].tsx", "app/[id]/page.tsx") is False
         assert match_glob("**/page.tsx", "app/[id]/page.tsx")
+
+    def test_two_double_stars_reach_one_state_twice_and_reuse_it(self) -> None:
+        # A path that does not match walks both branches of each `**`, so the second one arrives
+        # at `(1, 1)` again; the memo answers the repeat instead of walking it a second time.
+        assert match_glob("**/**/nope.js", "a/b.js") is False
+
+    def test_an_exhausted_budget_raises_and_names_the_pattern(self) -> None:
+        with pytest.raises(ValueError) as caught:
+            match_glob("**/**/*.js", "a/b/c.js", max_steps=1)
+        assert "**/**/*.js" in str(caught.value)
+        assert "exceeded 1 steps" in str(caught.value)
+
+
+class TestKnownRoles:
+    def test_the_builtin_roles_and_the_glob_roles_are_all_known(self) -> None:
+        known = known_roles(ROLE_GLOBS)
+        assert SOURCE_ROLE in known
+        assert "editor-autorun" in known
 
 
 class TestFallback:

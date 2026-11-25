@@ -20,7 +20,15 @@ from __future__ import annotations
 
 from .detectors import DETECTORS, Detector
 from .fingerprint import PendingFinding, number_occurrences
-from .model import MAX_MESSAGE_CHARS, REPO_PATH, FileEntry, Finding, ScanContext, Severity
+from .model import (
+    MAX_EVIDENCE_CHARS,
+    MAX_MESSAGE_CHARS,
+    REPO_PATH,
+    FileEntry,
+    Finding,
+    ScanContext,
+    Severity,
+)
 from .rules import apply_patterns, cap_findings
 
 DETECTOR_ERROR_RULE_ID = "detector-error"
@@ -98,19 +106,29 @@ def _detector_error(detector: Detector, error: BaseException) -> PendingFinding:
     """
     name = getattr(detector, "__module__", repr(detector))
     detail = f"{name}: {type(error).__name__}: {error}"
+    # Keep the last module component and always keep the exception type. The budget is the
+    # total message, because `Finding` rejects a message over MAX_MESSAGE_CHARS outright, and
+    # a detail sliced to that length made the total longer, raising inside `to_finding`.
+    type_name = type(error).__name__
+    prefix = "A detector raised and its coverage is missing from this scan: "
+    suffix = ". The exception text is in the evidence."
+    short_name = name.rsplit(".", 1)[-1]
+    room = MAX_MESSAGE_CHARS - len(prefix) - len(suffix) - len(type_name) - 2  # ": "
+    if room < 0:
+        short_name = ""
+    elif len(short_name) > room:
+        short_name = short_name[:room]
+    named = f"{short_name}: {type_name}" if short_name else type_name
     return PendingFinding(
         rule_id=DETECTOR_ERROR_RULE_ID,
         severity=Severity.HIGH,
         path=REPO_PATH,
         line=0,
         roles=(),
-        message=(
-            "A detector raised and its coverage is missing from this scan: "
-            f"{name}: {type(error).__name__}. The exception text is in the evidence."
-        )[:MAX_MESSAGE_CHARS],
+        message=prefix + named + suffix,
         # The detail is the evidence, so two failures of one detector on one commit collapse to
         # one fingerprint while a different exception stays a new finding.
-        evidence=_visible_escapes(detail)[:MAX_MESSAGE_CHARS],
+        evidence=_visible_escapes(detail)[:MAX_EVIDENCE_CHARS],
         suppressible=False,
     )
 

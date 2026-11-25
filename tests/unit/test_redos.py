@@ -78,6 +78,8 @@ CODE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ci_surface._DISPLAY_VERB", ci_surface._DISPLAY_VERB),
     ("ci_surface._HEAD_REF", ci_surface._HEAD_REF),
     ("ci_surface._CHECKOUT_STEP", ci_surface._CHECKOUT_STEP),
+    ("ci_surface._SEGMENT_BREAK", ci_surface._SEGMENT_BREAK),
+    ("ci_surface._FETCH_PR_REF", ci_surface._FETCH_PR_REF),
     ("ci_surface._EXEC_TARGET", ci_surface._EXEC_TARGET),
     ("config_role._DANGEROUS_COMMAND", config_role._DANGEROUS_COMMAND),
     ("config_role._NON_LITERAL_REQUIRE", config_role._NON_LITERAL_REQUIRE),

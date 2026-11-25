@@ -147,7 +147,7 @@ class TestThePageIsRead:
     def test_every_table_row_is_parsed(self) -> None:
         text = README.read_text(encoding="utf-8")
         rows = sum(len(table.rows) for table in tables(text))
-        assert rows == 22, f"the parser read {rows} rows; the four tables hold 22"
+        assert rows == 23, f"the parser read {rows} rows; the four tables hold 23"
 
     def test_the_metric_is_found(self) -> None:
         assert metric(README.read_text(encoding="utf-8")) > 0

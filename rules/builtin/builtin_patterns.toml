@@ -105,3 +105,28 @@ suppressible = true
 rationale = "The `_0x` plus hex identifier is the naming scheme the JavaScript obfuscators emit, and it survives a rename of the tool because it is a property of the output rather than of a banner. ARCHITECTURE.md 9.6 is explicit that obfuscator fingerprints rotate weekly while the mechanism stays, so this keys on the identifier grammar and not on a list of tool names. It is a WARN because the shape has one ordinary owner: a minified or packed bundle committed to the repository, which is a release-integrity question for the artifact rules rather than a payload by itself."
 pattern = { kind = "regex", value = '''\b_0x[0-9a-fA-F]{4,}\b''' }
 tests = { positive = "pat_obfuscator_id", negative = "pat_obfuscator_id" }
+
+# A JSON Web Token is a bearer credential: a Supabase service key or a long-lived API token in a
+# Soroban frontend is worth what a seed is worth to whoever reads the bundle, and no rule matched
+# the shape before this one (`ARCHITECTURE.md` 9.6, credential harvesting).
+#
+# The rule is the envelope and nothing more. Three base64url runs around two literal dots, anchored
+# on the header prefix `eyJ` (base64url of an opening JSON brace), needs no decoder and no network,
+# which is what `AGENTS.md` 4 allows. Every quantifier is bounded, so a cap-length line of one
+# character cannot make the pattern work: the first run stops at 400 characters and the pattern
+# fails at the dot.
+#
+# The minimum lengths are the false-positive budget. Two segments are the truncated shape and a bare
+# header is the part every article about the shape quotes, so neither matches; a token that reaches
+# the report is one somebody could present. HIGH and suppressible, since a test fixture or a local
+# development token is the ordinary false positive.
+[[rule]]
+id = "pat-jwt"
+title = "JSON Web Token committed in code"
+roles = ["source", "tooling-config", "editor-autorun", "other"]
+detector = "pattern"
+severity = "high"
+suppressible = true
+rationale = "A committed JWT is a live credential with an expiry rather than a dead string: whoever reads the source or the bundle can present it to the issuer until that expiry, and a service-role key is worse than the user's own token. The shape is unambiguous enough to key on the envelope, the header always begins with the base64url of an opening JSON brace, and the three bounded segments keep a truncated pair or a prose mention out of the report. Decoding claims is out of scope: the rule decides whether the envelope is there, not what it grants."
+pattern = { kind = "regex", value = '''\beyJ[A-Za-z0-9_-]{8,400}\.[A-Za-z0-9_-]{8,1500}\.[A-Za-z0-9_-]{16,400}\b''' }
+tests = { positive = "pat_jwt", negative = "pat_jwt" }

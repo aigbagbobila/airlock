@@ -8,14 +8,10 @@ from . import Case, File, Fixture
 def submodule_url_drift() -> Fixture:
     gitlink = File("vendor/dep", skip_reason="submodule")
     positive_modules = (
-        '[submodule "dep"]\n'
-        'path = "vendor/dep"\n'
-        'url = "https://mirror.invalid/dep.git"\n'
+        '[submodule "dep"]\npath = "vendor/dep"\nurl = "https://mirror.invalid/dep.git"\n'
     )
     negative_modules = (
-        '[submodule "dep"]\n'
-        'path = "vendor/dep"\n'
-        'url = "https://github.com/owner/dep.git"\n'
+        '[submodule "dep"]\npath = "vendor/dep"\nurl = "https://github.com/owner/dep.git"\n'
     )
     return Fixture(
         positive=Case(files=(File(".gitmodules", text=positive_modules), gitlink)),

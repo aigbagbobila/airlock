@@ -126,9 +126,10 @@ class TestMismatchAndMove:
         assert "target/counter.wasm" in findings[0].message
 
     def test_a_known_hash_at_a_new_path_is_clean_when_all_declared_paths_are_absent(self) -> None:
-        assert run(
-            [wasm("dist/renamed.wasm", BUILD_A)], manifest_of(listed("target/counter.wasm"))
-        ) == []
+        assert (
+            run([wasm("dist/renamed.wasm", BUILD_A)], manifest_of(listed("target/counter.wasm")))
+            == []
+        )
 
     def test_a_mismatch_wins_over_a_move_on_the_same_file(self) -> None:
         # The path is listed and the hash is known elsewhere: the declared slot changed content,

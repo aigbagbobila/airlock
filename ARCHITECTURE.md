@@ -134,7 +134,7 @@ A file may have several roles. Globs use a small internal matcher where `**` spa
 
 A detector is a function `run(ctx) -> Iterable[Finding]` registered in a plain list. (An earlier draft used a Protocol class and a registry object; a list of functions is enough.) `ScanContext` exposes exactly four things: the collected file entries with their roles, the trusted policy, the trusted manifest and the loaded rule data. It does not expose the trust model itself — see 7.9.
 
-Every call is wrapped: an exception becomes a HIGH `detector-error` and the remaining detectors still run. Findings a detector yielded before it raised are kept, so one failure on the tenth file costs the scan that file's coverage and nothing more. The message is built only from scanner-written text, the in-tree detector module name and the exception type. The exception's own text moves to the evidence, with C0 control characters escaped visibly and newlines flattened, so a path or line fragment quoted by the exception cannot forge an annotation or hide the finding. Third-party detector plugins are not supported, because loading external code would defeat the trust model.
+Every call is wrapped: an exception becomes a HIGH `detector-error` and the remaining detectors still run. Findings a detector yielded before it raised are kept, so one failure on the tenth file costs the scan that file's coverage and nothing more. The message is built only from scanner-written text, the in-tree detector module name and the exception type, with the module shortened to its last component and the exception type always kept inside the 200-character budget the message is validated against. The exception's own text moves to the evidence, with C0 control characters escaped visibly and newlines flattened, so a path or line fragment quoted by the exception cannot forge an annotation or hide the finding. Third-party detector plugins are not supported, because loading external code would defeat the trust model.
 
 The registry also names the valid `builtin:<name>` targets (`DETECTOR_NAMES`), so the rule loader rejects a rule pointing at a detector that does not exist. The registered detectors include `config_role`, `wasm_manifest` and `submodules`; the latter reads `.gitmodules` metadata only and never fetches a submodule.
 
@@ -268,7 +268,7 @@ fingerprint = sha256(rule_id \0 normalized_path \0 normalized_evidence \0 occurr
 
 The four fields are joined with a NUL byte, and the payload is self-delimiting: when any field contains a NUL, which only attacker-controlled evidence can, all four are length-prefixed behind a leading NUL marker instead. A NUL-free payload is byte identical to the formula above, so suppressions written before this rule keep matching.
 
-`normalized_evidence` is the matched line with outer whitespace stripped and internal whitespace runs collapsed. Line numbers are excluded so edits above a line do not invalidate a suppression. `occurrence` is the zero-based index of that identical evidence within the file, so a second copy of a suppressed line is a new, unsuppressed finding (B5). If an earlier duplicate is removed, indices shift and the suppression must be reissued; that fails closed. For file-level findings the file's SHA-256 replaces the evidence. A scanner-state finding (`skipped-oversize`, `history-rewritten`, `policy-unknown-key`) has neither a matched line nor file bytes, so it keys on its message: the message is written by the scanner, never by scanned content, and every state rule is non-suppressible, so rewording one cannot move an owner's suppression. A state finding whose message is blank, which a detector bug can produce, keys on `state:<rule_id>:<path>:<line>` instead of raising: one such finding must not turn the whole scan into a configuration error, and the same non-suppressibility means the line number in this one key cannot move a suppression. [Unverified: churn on real edits]
+`normalized_evidence` is the full matched line with outer whitespace stripped and internal whitespace runs collapsed. The 200-character excerpt stored on the finding is a display cap only: the key is built from the untruncated line, so two lines that share a prefix but differ later never collide into one fingerprint. A suppression written for evidence longer than the cap before this rule may need re-keying, which is unavoidable: the old digest named a truncated copy. Line numbers are excluded so edits above a line do not invalidate a suppression. `occurrence` is the zero-based index of that identical evidence within the file, so a second copy of a suppressed line is a new, unsuppressed finding (B5). If an earlier duplicate is removed, indices shift and the suppression must be reissued; that fails closed. For file-level findings the file's SHA-256 replaces the evidence. A scanner-state finding (`skipped-oversize`, `history-rewritten`, `policy-unknown-key`) has neither a matched line nor file bytes, so it keys on its message: the message is written by the scanner, never by scanned content, and every state rule is non-suppressible, so rewording one cannot move an owner's suppression. A state finding whose message is blank, which a detector bug can produce, keys on `state:<rule_id>:<path>:<line>` instead of raising: one such finding must not turn the whole scan into a configuration error, and the same non-suppressibility means the line number in this one key cannot move a suppression. [Unverified: churn on real edits]
 
 ### 7.4 Rule file
 
@@ -306,7 +306,9 @@ globs = ["**/package.json"]
 globs = ["**/.husky/**", "**/.githooks/**"]
 ```
 
-Wasm and native binaries are resolved by content magic, not globs. The `tooling-config` defaults include Vite, Webpack and Jest because their config files are loaded as executable build or test configuration. Other config names remain out of scope until they have false-positive review.
+The table is compiled once per scan (`compile_role_globs`) into sorted role names and per-segment patterns, and the collector passes that matcher to every entry, so a large tree does not repeat the same sort and pattern construction. `**` matching is memoised on the pattern and path indices and runs under a step budget; exhausting it raises `ValueError` naming the pattern and the path length, which the CLI reports as a configuration error rather than a quiet no-match, because a no-match can give a sensitive file the wrong role and silence a rule.
+
+Wasm and native binaries are resolved by content magic, not globs. The `tooling-config` defaults mirror the files named in the OpenSourceMalware reports. [Verified] Extra configs (`vite`, `webpack`, `jest`, and others) are P1 and need false-positive review. [Unverified]
 
 The three added here, together with `editor-autorun`'s new settings file, are the CI surface (9.7).
 Each names a path something executes with credentials attached, which is the bar for joining
@@ -476,7 +478,7 @@ Applies to role `tooling-config`. Runs on raw text, no masking.
 2. Capability rules the engine runs: `cfg-dynamic-code`, `cfg-network`, `cfg-chain-endpoint`.
 3. `cfg-process-spawn`, in this detector, two tiers off one pattern: WARN for a build step stated up front, HIGH when the command names a downloader, a decoder or an inline script.
 4. Combination rule `cfg-network-exec`: network capability and (process spawn, dynamic code or `require()` of a non-literal) in one file is HIGH even when each alone would be WARN.
-5. `cfg-appended-tail`: take the last non-empty line; flag if its length exceeds `tail_max_len` or if the entropy of its trailing window exceeds `tail_entropy`. Thresholds are placeholders until tuned on the corpus. [Unverified]
+5. `cfg-appended-tail`: take the last non-empty line and join the lines before it that are single whitespace-free tokens, walking backwards until the window reaches `tail_max_len`; flag if the final line's length exceeds `tail_max_len` or if the entropy of the trailing window exceeds `tail_entropy`. The window is what makes a payload split over the last two lines measurable, and the token restriction is what keeps an ordinary two-line config from reading as opaque. Thresholds are placeholders until tuned on the corpus. [Unverified]
 6. `cfg-nul`, reported by the collector for every role, so an unexpected role cannot hide it.
 
 Capability rules were chosen because obfuscator fingerprints rotate while the mechanism (fetch remote content, decrypt, evaluate) stays. [Verified: OpenSourceMalware reporting] Known limit: string concatenation such as `globalThis['ev'+'al']` evades regex. The long-line and tail rules give partial coverage; parser analysis is Later.
@@ -616,9 +618,14 @@ the same bound.
 Ported since, as task 3.6's second slice, in its own rule file and its own detector, because three of
 the shapes need two conditions at once: see 9.7.
 
-Not yet ported from the list above: credential harvesting, blockchain C2 shapes, `build.rs` network
-and the native-binary rules. The last two belong with the Cargo work in 6.4; credential harvesting
-and blockchain C2 have no rule, fixture or decision behind them yet, and are not guessed at here.
+`pat-jwt` is the narrow slice of credential harvesting (task 9.86): the three-segment base64url
+envelope, anchored on the `eyJ` header prefix, with no decoder and no network. Decoding claims is
+out of scope, so the rule decides whether a token is committed and not what it grants.
+
+Not yet ported from the list above: the rest of credential harvesting, blockchain C2 shapes,
+`build.rs` network and the native-binary rules. The last two belong with the Cargo work in 6.4;
+the remaining credential-harvesting shapes and blockchain C2 have no rule, fixture or decision
+behind them yet, and are not guessed at here.
 
 ### 9.7 `ci_surface`
 
@@ -637,16 +644,22 @@ word on the line:
 
 1. `pat-secret-dump` (HIGH): `${{ secrets.* }}` on a line that also names a command able to display
    it (`echo`, `printf`, `print`, `cat`, `tee`, `xxd`, `base64`, `Write-Output`, `Add-Content`,
-   `Out-File`), with `::add-mask::` carved out because that one echo is hygiene. A secret handed to a
-   step through `env:` or `with:` is the negative fixture rather than a finding; that is how a
+   `Out-File`), with `::add-mask::` carved out because that one echo is hygiene. The carve-out is
+   per command: one line is split at `;`, `&&`, `||` and `|`, the masked command is dropped and the
+   rest is judged, so masking one credential does not excuse a second one beside it. A secret handed
+   to a step through `env:` or `with:` is the negative fixture rather than a finding; that is how a
    workflow uses a credential, and reporting it would bury the shape under noise.
 2. `pat-ptr-head-checkout` (HIGH): the privileged trigger, a head ref
    (`github.event.pull_request.head`, `refs/pull/N/head`, `refs/pull/N/merge`) and an
    `actions/checkout` step in one file. Three conditions, because every pair of them has an innocent
    reading: `pull_request` with a head checkout is reviewed code in a read-only context, and
-   `pull_request_target` that leaves the default base ref is the safe form. The trigger half is read
-   out of `pat-privileged-trigger`'s own pattern, so the WARN and the HIGH cannot drift apart on what
-   a privileged trigger is.
+   `pull_request_target` that leaves the default base ref is the safe form. A run block that fetches
+   `pull/<number>/head` (or `+refs/pull/...`) and then checks out what it fetched is the same
+   pairing, with the finding on the fetch line: the trigger, a head ref and a checkout of the
+   contributor's tree are still all present, just without an `actions/checkout` step. A fetch the
+   file never checks out is not the pairing. The trigger half is read out of
+   `pat-privileged-trigger`'s own pattern, so the WARN and the HIGH cannot drift apart on what a
+   privileged trigger is.
 3. `pat-lifecycle-exec` (HIGH): a line that both fetches and hands the result to a shell or
    interpreter, which covers `curl ... | bash`, `... && python`, `| Invoke-Expression`,
    `bash <(curl ...)` and an `eval` of a fetched string. The fetch half comes from

@@ -54,6 +54,7 @@ class TestShippedRuleSet:
             "pat-editor-command-path",
             "pat-exfil-endpoint",
             "pat-invisible-unicode",
+            "pat-jwt",
             "pat-lifecycle-exec",
             "pat-lifecycle-fetch",
             "pat-obfuscator-id",

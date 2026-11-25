@@ -37,16 +37,17 @@ CONFTEST = REPO_ROOT / "tests" / "conftest.py"
 #:
 #: The worst of the three matrix interpreters, not the 3.12 one: the ceiling gates every job, so a
 #: basis taken from the fastest interpreter would set a limit the slowest one is expected to break.
-#: The three main pushes before this row, per interpreter: 12.85 / 11.91 / 11.33 at 1164 tests,
+#: The three main pushes before the first row, per interpreter: 12.85 / 11.91 / 11.33 at 1164 tests,
 #: 9.12 / 12.39 / 10.80 at 1170, and 13.97 / 16.57 / 12.24 at 1182. The spread between runs of the
-#: same suite is why this is a maximum rather than an average.
-MEASURED_TOTAL_SECONDS = 31.00
+#: same suite is why this is a maximum rather than an average. The suite has since grown to 1517
+#: tests, and the next row is the run where the old 34.0s ceiling stopped fitting it.
+MEASURED_TOTAL_SECONDS = 34.07
 
 #: The run behind that number, so a reader can tell whether their machine is the same one. The
 #: interpreter and pytest version are in it because both move the total with no change here.
 MEASURED_ON = (
     "GitHub Actions ubuntu-24.04 runner, 4 vCPU, Python 3.12.16, pytest 9.2.0, `python -m pytest`, "
-    "run 82 of commit 23319a9, 2026-11-21"
+    "run 45487871273 of commit 478fbe0, 2026-11-24, 1517 tests"
 )
 
 #: The budget. Above the measurement so the suite passes as it stands, and close enough to it that
@@ -54,9 +55,10 @@ MEASURED_ON = (
 #: a limit rather than a remark.
 #: `test_lowering_the_ceiling_by_ten_percent_would_have_failed_the_run` asserts exactly that gap,
 #: so the constant cannot drift to a value that stops biting.
-#: 18.0 is the largest value that still satisfies that rule against 16.57: a ceiling is only worth
-#: having on the machine that has a deadline, and the old 45.0 was four times the CI total.
-SUITE_SECONDS_CEILING = 34.0
+#: 37.85 is the largest value that still satisfies that rule against 34.07. The run above measured
+#: 34.07 against the old 34.0 ceiling and failed by 0.07s, so this moves to 36.0: a ceiling is only
+#: worth having on the machine that has a deadline, and the old 45.0 was four times the CI total.
+SUITE_SECONDS_CEILING = 36.0
 
 
 def _load(path: Path, name: str) -> ModuleType:

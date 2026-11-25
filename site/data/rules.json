@@ -1,10 +1,10 @@
 {
   "source": "rules/builtin",
   "counts": {
-    "high": 17,
+    "high": 18,
     "warn": 12,
     "info": 0,
-    "total": 29
+    "total": 30
   },
   "rules": [
     {
@@ -66,6 +66,21 @@
       ],
       "suppressible": true,
       "rationale": "The `_0x` plus hex identifier is the naming scheme the JavaScript obfuscators emit, and it survives a rename of the tool because it is a property of the output rather than of a banner. ARCHITECTURE.md 9.6 is explicit that obfuscator fingerprints rotate weekly while the mechanism stays, so this keys on the identifier grammar and not on a list of tool names. It is a WARN because the shape has one ordinary owner: a minified or packed bundle committed to the repository, which is a release-integrity question for the artifact rules rather than a payload by itself."
+    },
+    {
+      "id": "pat-jwt",
+      "title": "JSON Web Token committed in code",
+      "severity": "high",
+      "family": "builtin_patterns",
+      "detector": "pattern",
+      "roles": [
+        "source",
+        "tooling-config",
+        "editor-autorun",
+        "other"
+      ],
+      "suppressible": true,
+      "rationale": "A committed JWT is a live credential with an expiry rather than a dead string: whoever reads the source or the bundle can present it to the issuer until that expiry, and a service-role key is worse than the user's own token. The shape is unambiguous enough to key on the envelope, the header always begins with the base64url of an opening JSON brace, and the three bounded segments keep a truncated pair or a prose mention out of the report. Decoding claims is out of scope: the rule decides whether the envelope is there, not what it grants."
     },
     {
       "id": "cfg-dynamic-code",
