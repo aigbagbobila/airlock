@@ -105,7 +105,7 @@ def builders() -> Mapping[str, Builder]:
         ci_surface_hook_window,
         config_role,
         jwt_shape,
-            native_binary_artifact,
+        native_binary_artifact,
         npm_lockfile_registry,
         stellar_seed,
         submodule_url_drift,
